@@ -14,12 +14,12 @@ import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.inventory.*;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 
 public final class HavocPlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     private final Map<String, Long> activeUntil = new HashMap<>();
+    private final Map<String, Double> activeBoosts = new HashMap<>();
     private final Map<String, BossBar> bossBars = new HashMap<>();
 
     @Override public void onEnable() {
@@ -36,13 +36,33 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
     }
 
     @Override public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player player)) { sender.sendMessage("Command ini hanya bisa digunakan pemain."); return true; }
-        if (!player.hasPermission("havoc.admin")) { player.sendMessage(color("&cKamu tidak punya izin.")); return true; }
+        if (!sender.hasPermission("havoc.admin")) {
+            sender.sendMessage(color("&cKamu tidak punya izin."));
+            return true;
+        }
+        if (args.length > 0 && args[0].equalsIgnoreCase("reload")) {
+            reloadConfig();
+            sender.sendMessage(color("&aConfig Havoc berhasil di-reload."));
+            sender.sendMessage(color("&7Event yang sedang berjalan tetap memakai timer dan boost sebelumnya."));
+            return true;
+        }
+        if (args.length > 0) {
+            sender.sendMessage(color("&cPenggunaan: /hvc [reload]"));
+            return true;
+        }
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(color("&cCommand ini hanya bisa digunakan pemain."));
+            return true;
+        }
         openMain(player);
         return true;
     }
 
     @Override public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (args.length == 1 && sender.hasPermission("havoc.admin")) {
+            return Collections.singletonList("reload").stream()
+                    .filter(option -> option.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
+        }
         return Collections.emptyList();
     }
 
@@ -70,8 +90,8 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
         Inventory inv = Bukkit.createInventory(null, 27, color("&0Event"));
         inv.setItem(10, item(Material.ENCHANTED_BOOK, "&bMending Boost", "&7Mulai event boost Mending.", "&8Hanya durasi/boost dari config.yml"));
         inv.setItem(12, item(Material.TOTEM_OF_UNDYING, "&eTotem Boost", "&7Mulai event boost Totem.", "&8Hanya durasi/boost dari config.yml"));
-        inv.setItem(14, item(Material.PAPER, "&bChance Mending", "&7Saat ini: &f" + getConfig().getDouble("fishing.mending-chance") + "%", "&cKlik kiri: -0.1% | Shift: -1%", "&aKlik kanan: +0.1% | Shift: +1%"));
-        inv.setItem(16, item(Material.TOTEM_OF_UNDYING, "&eChance Totem", "&7Saat ini: &f" + getConfig().getDouble("evoker.totem-chance") + "%", "&cKlik kiri: -0.1% | Shift: -1%", "&aKlik kanan: +0.1% | Shift: +1%"));
+        inv.setItem(14, item(Material.PAPER, "&bChance Mending", "&7Saat ini: &f" + getConfig().getDouble("fishing.mending-chance") + "%", "&cKlik kiri: -0.1% | Shift+kiri: -1%", "&aKlik kanan: +0.1% | Shift+kanan: +1%"));
+        inv.setItem(16, item(Material.TOTEM_OF_UNDYING, "&eChance Totem", "&7Saat ini: &f" + getConfig().getDouble("evoker.totem-chance") + "%", "&cKlik kiri: -0.1% | Shift+kiri: -1%", "&aKlik kanan: +0.1% | Shift+kanan: +1%"));
         fill(inv);
         p.openInventory(inv);
     }
@@ -112,9 +132,13 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
         else if (slot == 12) startBoost("totem", p);
         else if (slot == 14 || slot == 16) {
             String path = slot == 14 ? "fishing.mending-chance" : "evoker.totem-chance";
+            // Shift + click changes by 1%; normal click changes by 0.1%.
+            // Only left and right clicks are accepted.
+            if (!e.isLeftClick() && !e.isRightClick()) return;
             double delta = e.isShiftClick() ? 1.0 : 0.1;
             if (e.isLeftClick()) delta = -delta;
-            double value = Math.max(0, Math.min(100, getConfig().getDouble(path) + delta));
+            double value = Math.max(0.0, Math.min(100.0,
+                    getConfig().getDouble(path) + delta));
             getConfig().set(path, Math.round(value * 10.0) / 10.0);
             saveConfig();
             openEvent(p);
@@ -126,6 +150,7 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
         int duration = Math.max(1, getConfig().getInt(path + "duration-seconds", 3600));
         double boost = getConfig().getDouble(path + "boost", 5.0);
         activeUntil.put(type, System.currentTimeMillis() + duration * 1000L);
+        activeBoosts.put(type, boost);
         Bukkit.broadcastMessage(color(getConfig().getString(path + "announcement", "")));
         String title = color(getConfig().getString(path + "title", ""));
         String subtitle = color(getConfig().getString(path + "subtitle", ""));
@@ -133,25 +158,33 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
 
         BossBar old = bossBars.remove(type);
         if (old != null) old.removeAll();
-        BossBar bar = Bukkit.createBossBar(color(getConfig().getString(path + "bossbar", "&6Havoc Boost")),
+        String bossbarText = getConfig().getString(path + "bossbar", "&6Havoc Boost");
+        BossBar bar = Bukkit.createBossBar("", 
                 type.equals("mending") ? BarColor.PURPLE : BarColor.YELLOW, BarStyle.SOLID);
-        bar.setProgress(1.0);
         Bukkit.getOnlinePlayers().forEach(bar::addPlayer);
         bossBars.put(type, bar);
 
+        final long endTime = System.currentTimeMillis() + duration * 1000L;
         new BukkitRunnable() {
-            int remaining = duration;
             @Override public void run() {
-                if (remaining <= 0) {
+                long millisLeft = Math.max(0L, endTime - System.currentTimeMillis());
+                long secondsLeft = (millisLeft + 999L) / 1000L;
+                if (secondsLeft <= 0L) {
                     activeUntil.remove(type);
+                    activeBoosts.remove(type);
                     bar.removeAll();
                     bossBars.remove(type);
                     Bukkit.broadcastMessage(color("&c[HAVOC] Event " + type + " telah berakhir."));
                     cancel();
                     return;
                 }
-                bar.setProgress(Math.max(0.0, Math.min(1.0, remaining / (double) duration)));
-                remaining--;
+
+                long hours = secondsLeft / 3600L;
+                long minutes = (secondsLeft % 3600L) / 60L;
+                long seconds = secondsLeft % 60L;
+                String timer = String.format(Locale.ROOT, "%02d:%02d:%02d", hours, minutes, seconds);
+                bar.setTitle(color(bossbarText + " &8| &f" + timer));
+                bar.setProgress(Math.max(0.0, Math.min(1.0, millisLeft / (duration * 1000.0))));
             }
         }.runTaskTimer(this, 0L, 20L);
         initiator.sendMessage(color("&aEvent boost berhasil dimulai."));
@@ -163,7 +196,7 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
         double base = getConfig().getDouble(path);
         Long end = activeUntil.get(type);
         if (end != null && end > System.currentTimeMillis())
-            base += getConfig().getDouble("events." + type + ".boost", 0.0);
+            base += activeBoosts.getOrDefault(type, 0.0);
         return Math.max(0, Math.min(100, base));
     }
 
