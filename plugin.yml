@@ -1,0 +1,15 @@
+name: Havoc
+version: 1.0.0
+main: id.havoc.HavocPlugin
+api-version: '1.21'
+author: Havoc
+description: Havoc Hardcore System
+commands:
+  havoc:
+    description: Open Havoc Hardcore System
+    aliases: [hvc]
+    usage: /havoc
+permissions:
+  havoc.admin:
+    description: Allows using Havoc menus and controls
+    default: op

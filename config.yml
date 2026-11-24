@@ -1,0 +1,27 @@
+# Chance values are percentages from 0.0 to 100.0
+fishing:
+  mending-chance: 1.0
+
+evoker:
+  totem-chance: 100.0
+
+events:
+  mending:
+    duration-seconds: 3600
+    boost: 5.0
+    announcement: "&6[HAVOC] &eMending Boost dimulai! Chance mancing meningkat."
+    title: "&6MENDING BOOST"
+    subtitle: "&eChance Mending meningkat!"
+    bossbar: "&6Mending Boost &eaktif"
+  totem:
+    duration-seconds: 3600
+    boost: 5.0
+    announcement: "&6[HAVOC] &eTotem Boost dimulai! Chance Totem meningkat."
+    title: "&6TOTEM BOOST"
+    subtitle: "&eChance Totem meningkat!"
+    bossbar: "&6Totem Boost &eaktif"
+
+roleplay:
+  announcement: "&5[HAVOC] &dEvent Roleplay dimulai!"
+  title: "&5ROLEPLAY"
+  subtitle: "&dPersiapkan karakter kalian!"
