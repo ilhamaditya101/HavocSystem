@@ -1,5 +1,5 @@
 name: Havoc
-version: 1.0.2
+version: 1.1.0
 main: id.havoc.HavocPlugin
 api-version: '1.21'
 author: Havoc
@@ -9,6 +9,9 @@ commands:
     description: Open Havoc Hardcore System
     aliases: [hvc]
     usage: /havoc [reload]
+  shop:
+    description: Open the Havoc barter shop
+    usage: /shop [edit]
 permissions:
   havoc.admin:
     description: Allows using Havoc menus and controls

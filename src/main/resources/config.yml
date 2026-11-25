@@ -25,3 +25,14 @@ roleplay:
   announcement: "&5[HAVOC] &dEvent Roleplay dimulai!"
   title: "&5ROLEPLAY"
   subtitle: "&dPersiapkan karakter kalian!"
+
+# Barter shop event. Edit trades in-game with /shop edit.
+shop:
+  event:
+    duration-seconds: 3600
+    announcement: "&a[HAVOC] &fBarter Shop telah dibuka! Gunakan &e/shop&f untuk barter."
+    title: "&aBARTER SHOP"
+    subtitle: "&eTukar item selama event berlangsung!"
+    bossbar: "&aHavoc Barter Shop"
+    ended-announcement: "&c[HAVOC] Barter Shop telah ditutup."
+  offers: {}
