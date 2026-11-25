@@ -33,7 +33,6 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
     private static final String MAIN_TITLE = "&0Havoc Hardcore System";
     private static final String EVENT_TITLE = "&0Event";
     private static final String ROLEPLAY_TITLE = "&0Roleplay";
-    private static final String SHOP_TITLE = "&0Havoc Barter Shop";
     private static final String EDITOR_TITLE = "&0Shop Editor - Input / Output";
 
     @Override public void onEnable() {
@@ -194,13 +193,6 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
             if (e.isShiftClick() || (e.getClickedInventory() == e.getView().getTopInventory() && e.getRawSlot() == 4)) e.setCancelled(true);
             return;
         }
-        if (title.equals(color(SHOP_TITLE))) {
-            e.setCancelled(true);
-            if (e.getClickedInventory() == e.getView().getTopInventory() && e.getRawSlot() >= 0)
-                executeTrade(p, e.getRawSlot());
-            return;
-        }
-
         if (!title.equals(color(MAIN_TITLE)) && !title.equals(color(EVENT_TITLE)) && !title.equals(color(ROLEPLAY_TITLE))) return;
         e.setCancelled(true);
         if (e.getCurrentItem() == null || e.getCurrentItem().getType() == Material.GRAY_STAINED_GLASS_PANE) return;
@@ -229,9 +221,7 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
 
     @EventHandler public void onInventoryDrag(InventoryDragEvent e) {
         String title = e.getView().getTitle();
-        if (title.equals(color(SHOP_TITLE))) {
-            e.setCancelled(true);
-        } else if (title.equals(color(EDITOR_TITLE)) && e.getRawSlots().contains(4)) {
+        if (title.equals(color(EDITOR_TITLE)) && e.getRawSlots().contains(4)) {
             e.setCancelled(true);
         }
     }
