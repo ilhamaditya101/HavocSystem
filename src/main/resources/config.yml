@@ -35,4 +35,5 @@ shop:
     subtitle: "&eTukar item selama event berlangsung!"
     bossbar: "&aHavoc Barter Shop"
     ended-announcement: "&c[HAVOC] Barter Shop telah ditutup."
+    stopped-announcement: "&c[HAVOC] Barter Shop dihentikan oleh admin."
   offers: {}

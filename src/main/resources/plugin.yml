@@ -1,5 +1,5 @@
 name: Havoc
-version: 1.1.0
+version: 1.1.2
 main: id.havoc.HavocPlugin
 api-version: '1.21'
 author: Havoc
@@ -11,7 +11,7 @@ commands:
     usage: /havoc [reload]
   shop:
     description: Open the Havoc barter shop
-    usage: /shop [edit]
+    usage: /shop [edit|stop]
 permissions:
   havoc.admin:
     description: Allows using Havoc menus and controls
