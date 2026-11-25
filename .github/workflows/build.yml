@@ -22,4 +22,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Havoc-Plugin
-          path: target/Havoc-1.1.0.jar
+          path: target/Havoc-1.1.2.jar
