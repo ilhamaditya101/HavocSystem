@@ -29,6 +29,7 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
     private BossBar shopBossBar;
     private long shopEndsAt = 0L;
     private BukkitTask shopTimerTask;
+    private final Set<UUID> activeShopViewers = new HashSet<>();
     private static final String MAIN_TITLE = "&0Havoc Hardcore System";
     private static final String EVENT_TITLE = "&0Event";
     private static final String ROLEPLAY_TITLE = "&0Roleplay";
@@ -55,6 +56,14 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
     @Override public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         String cmd = command.getName().toLowerCase(Locale.ROOT);
         if (cmd.equals("shop")) {
+            if (args.length > 0 && args[0].equalsIgnoreCase("stop")) {
+                if (!sender.hasPermission("havoc.admin")) {
+                    sender.sendMessage(color("&cKamu tidak punya izin."));
+                    return true;
+                }
+                stopShopEvent(sender);
+                return true;
+            }
             if (args.length > 0 && args[0].equalsIgnoreCase("edit")) {
                 if (!sender.hasPermission("havoc.admin")) {
                     sender.sendMessage(color("&cKamu tidak punya izin."));
@@ -65,6 +74,10 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
                     return true;
                 }
                 openShopEditor(player);
+                return true;
+            }
+            if (args.length > 0) {
+                sender.sendMessage(color("&cPenggunaan: /shop, /shop edit, atau /shop stop"));
                 return true;
             }
             if (!(sender instanceof Player player)) {
@@ -104,7 +117,8 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
     @Override public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (command.getName().equalsIgnoreCase("shop")) {
             if (args.length == 1 && sender.hasPermission("havoc.admin"))
-                return Collections.singletonList("edit").stream().filter(x -> x.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
+                return Arrays.asList("edit", "stop").stream()
+                        .filter(x -> x.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
             return Collections.emptyList();
         }
         if (args.length == 1 && sender.hasPermission("havoc.admin"))
@@ -164,6 +178,16 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
         if (!(e.getWhoClicked() instanceof Player p)) return;
         String title = e.getView().getTitle();
 
+        // Biarkan inventory Merchant bawaan Minecraft menangani transaksi secara native.
+        if (activeShopViewers.contains(p.getUniqueId()) && e.getView().getTopInventory() instanceof MerchantInventory) {
+            if (!isShopActive()) {
+                e.setCancelled(true);
+                p.closeInventory();
+                p.sendMessage(color("&cShop event sudah berakhir."));
+            }
+            return;
+        }
+
         if (title.equals(color(EDITOR_TITLE))) {
             // Editor sengaja membolehkan pemain memindahkan item ke/dari inventory editor.
             if (e.getClickedInventory() == null) return;
@@ -219,6 +243,7 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
     }
 
     @EventHandler public void onEditorClose(InventoryCloseEvent e) {
+        if (e.getInventory() instanceof MerchantInventory) activeShopViewers.remove(e.getPlayer().getUniqueId());
         if (!e.getView().getTitle().equals(color(EDITOR_TITLE))) return;
         Inventory inv = e.getInventory();
         getConfig().set("shop.offers", null);
@@ -266,6 +291,36 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
 
     private boolean isShopActive() { return shopEndsAt > System.currentTimeMillis(); }
 
+    private void stopShopEvent(CommandSender sender) {
+        if (!isShopActive()) {
+            sender.sendMessage(color("&cBarter Shop event sedang tidak aktif."));
+            return;
+        }
+
+        shopEndsAt = 0L;
+        if (shopTimerTask != null) {
+            shopTimerTask.cancel();
+            shopTimerTask = null;
+        }
+        if (shopBossBar != null) {
+            shopBossBar.removeAll();
+            shopBossBar = null;
+        }
+
+        for (UUID viewerId : new HashSet<>(activeShopViewers)) {
+            Player viewer = Bukkit.getPlayer(viewerId);
+            if (viewer != null) {
+                viewer.closeInventory();
+                viewer.sendMessage(color("&cBarter Shop event dihentikan oleh admin."));
+            }
+        }
+        activeShopViewers.clear();
+
+        Bukkit.broadcastMessage(color(getConfig().getString("shop.event.stopped-announcement",
+                "&c[HAVOC] Barter Shop dihentikan oleh admin.")));
+        sender.sendMessage(color("&aBarter Shop event berhasil dihentikan."));
+    }
+
     private void startShopEvent(Player starter) {
         int duration = Math.max(1, getConfig().getInt("shop.event.duration-seconds", 3600));
         shopEndsAt = System.currentTimeMillis() + duration * 1000L;
@@ -288,7 +343,11 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
                     shopBossBar = null;
                     shopTimerTask = null;
                     Bukkit.broadcastMessage(color(getConfig().getString("shop.event.ended-announcement", "&c[HAVOC] Barter Shop telah ditutup.")));
-                    for (Player online : Bukkit.getOnlinePlayers()) if (online.getOpenInventory().getTitle().equals(color(SHOP_TITLE))) online.closeInventory();
+                    for (UUID viewerId : new HashSet<>(activeShopViewers)) {
+                        Player viewer = Bukkit.getPlayer(viewerId);
+                        if (viewer != null) viewer.closeInventory();
+                    }
+                    activeShopViewers.clear();
                     cancel();
                     return;
                 }
@@ -304,32 +363,38 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
     }
 
     private void openShop(Player p) {
-        Inventory inv = Bukkit.createInventory(null, 54, color(SHOP_TITLE));
+        if (!isShopActive()) {
+            p.sendMessage(color("&cShop event sedang tidak aktif."));
+            return;
+        }
+
+        Merchant merchant = Bukkit.createMerchant(color("&aHavoc Barter Shop"));
+        List<MerchantRecipe> recipes = new ArrayList<>();
         ConfigurationSection offers = getConfig().getConfigurationSection("shop.offers");
-        int index = 0;
         if (offers != null) {
             for (String key : offers.getKeys(false)) {
-                if (index >= 16) break;
                 ItemStack input = offers.getItemStack(key + ".input");
                 ItemStack output = offers.getItemStack(key + ".output");
                 if (!isRealItem(input) || !isRealItem(output)) continue;
-                int row = 1 + index / 4;
-                int pair = index % 4;
-                int outputSlot = row * 9 + pair * 2 + 1;
-                ItemStack display = output.clone();
-                ItemMeta meta = display.getItemMeta();
-                List<String> lore = meta.hasLore() ? new ArrayList<>(meta.getLore()) : new ArrayList<>();
-                lore.add(color("&7Bayar: &f" + input.getAmount() + "x " + pretty(input)));
-                lore.add(color("&eKlik untuk barter"));
-                meta.setLore(lore);
-                display.setItemMeta(meta);
-                inv.setItem(outputSlot, display);
-                inv.setItem(outputSlot - 1, input.clone());
-                index++;
+
+                MerchantRecipe recipe = new MerchantRecipe(output.clone(), Integer.MAX_VALUE);
+                recipe.setIngredients(Collections.singletonList(input.clone()));
+                recipe.setExperienceReward(false);
+                recipe.setVillagerExperience(0);
+                recipe.setPriceMultiplier(0.0f);
+                recipe.setDemand(0);
+                recipes.add(recipe);
             }
         }
-        if (index == 0) inv.setItem(22, item(Material.BARRIER, "&cBelum ada trade", "&7Admin bisa mengatur dengan /shop edit."));
-        p.openInventory(inv);
+
+        if (recipes.isEmpty()) {
+            p.sendMessage(color("&cBelum ada trade yang tersedia. Admin bisa mengaturnya dengan /shop edit."));
+            return;
+        }
+
+        merchant.setRecipes(recipes);
+        p.openMerchant(merchant, true);
+        activeShopViewers.add(p.getUniqueId());
     }
 
     private String pretty(ItemStack stack) {
@@ -337,52 +402,6 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
         if (meta != null && meta.hasDisplayName()) return ChatColor.stripColor(meta.getDisplayName());
         String name = stack.getType().name().toLowerCase(Locale.ROOT).replace('_', ' ');
         return name.substring(0, 1).toUpperCase(Locale.ROOT) + name.substring(1);
-    }
-
-    private void executeTrade(Player p, int clickedSlot) {
-        if (!isShopActive()) { p.closeInventory(); p.sendMessage(color("&cShop event sudah berakhir.")); return; }
-        int row = clickedSlot / 9;
-        int col = clickedSlot % 9;
-        if (row < 1 || row > 4 || col % 2 != 1 || col > 7) return;
-        int pairIndex = (row - 1) * 4 + (col - 1) / 2;
-        String key = "shop.offers." + pairIndex;
-        ItemStack input = getConfig().getItemStack(key + ".input");
-        ItemStack output = getConfig().getItemStack(key + ".output");
-        if (!isRealItem(input) || !isRealItem(output)) return;
-        if (!p.getInventory().containsAtLeast(input, input.getAmount())) {
-            p.sendMessage(color("&cItem barter kamu tidak cukup! Butuh " + input.getAmount() + "x " + pretty(input) + "."));
-            return;
-        }
-        if (p.getInventory().firstEmpty() == -1 && !hasRoomFor(p, output)) {
-            p.sendMessage(color("&cInventory kamu penuh!"));
-            return;
-        }
-        removeItems(p, input.clone());
-        Map<Integer, ItemStack> leftover = p.getInventory().addItem(output.clone());
-        leftover.values().forEach(item -> p.getWorld().dropItemNaturally(p.getLocation(), item));
-        p.sendMessage(color("&aBarter berhasil! Kamu mendapatkan " + output.getAmount() + "x " + pretty(output) + "."));
-    }
-
-    private boolean hasRoomFor(Player p, ItemStack item) {
-        int remaining = item.getAmount();
-        for (ItemStack content : p.getInventory().getStorageContents()) {
-            if (content == null || content.getType().isAir()) remaining -= item.getMaxStackSize();
-            else if (content.isSimilar(item)) remaining -= Math.max(0, content.getMaxStackSize() - content.getAmount());
-            if (remaining <= 0) return true;
-        }
-        return remaining <= 0;
-    }
-
-    private void removeItems(Player p, ItemStack required) {
-        int remaining = required.getAmount();
-        for (int i = 0; i < p.getInventory().getStorageContents().length && remaining > 0; i++) {
-            ItemStack content = p.getInventory().getItem(i);
-            if (content == null || !content.isSimilar(required)) continue;
-            int take = Math.min(remaining, content.getAmount());
-            content.setAmount(content.getAmount() - take);
-            if (content.getAmount() <= 0) p.getInventory().setItem(i, null);
-            remaining -= take;
-        }
     }
 
     private void startBoost(String type, Player initiator) {
