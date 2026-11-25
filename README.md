@@ -1,15 +1,15 @@
-# Havoc 1.1.0
+# Havoc 1.1.2
 
 Paper 1.21.1 plugin, Java 21, Maven.
 
 ## Commands
-- `/havoc` or `/hvc`: open the admin menu.
-- `/hvc reload`: reload config.yml.
-- `/shop`: open the barter shop while its event is active (all players).
-- `/shop edit`: open the admin trade editor (requires `havoc.admin`).
+- `/havoc` or `/hvc`: open the Havoc Hardcore System menu.
+- `/havoc reload` or `/hvc reload`: reload `config.yml`.
+- `/shop`: open the native Minecraft Merchant/Villager trading interface while the Barter Shop event is active.
+- `/shop edit`: open the admin editor; put payment items in the left slots and result items in the paired right slots, then close to save.
+- `/shop stop`: immediately stop the active Barter Shop event, close all open shop trading windows, remove its bossbar/timer, and broadcast the configured stopped announcement.
 
-## Shop editor
-For each trade pair, place the required payment item in the left slot and the reward item in the right slot. Close the editor to save. Up to 16 trades. The shop event is started from the Event menu and its duration/messages are configured in config.yml.
+`/shop edit` and `/shop stop` require `havoc.admin` (default: op). The shop uses Bukkit/Paper Merchant recipes and does not require an external shop plugin. Each offer currently uses one payment item stack and one result item stack.
 
 ## Build
-Use Java 21 and run `mvn clean package`. GitHub Actions builds the jar automatically.
+Run `mvn clean package` with Java 21. GitHub Actions builds the jar and uploads it as an artifact.
