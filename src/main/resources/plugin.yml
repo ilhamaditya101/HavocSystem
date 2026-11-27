@@ -1,18 +1,18 @@
 name: Havoc
-version: 1.1.3
+version: 1.1.4
 main: id.havoc.HavocPlugin
 api-version: '1.21'
 author: Havoc
 description: Havoc Hardcore System
 commands:
   havoc:
-    description: Open Havoc Hardcore System
+    description: Havoc menu, events, and mass teleport
     aliases: [hvc]
-    usage: /havoc [reload]
+    usage: /havoc [reload|event|tpall]
   shop:
     description: Open the Havoc barter shop
     usage: /shop [edit|stop]
 permissions:
   havoc.admin:
-    description: Allows using Havoc menus and controls
+    description: Allows using Havoc menus, events, and mass teleport
     default: op

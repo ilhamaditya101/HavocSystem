@@ -37,3 +37,30 @@ shop:
     ended-announcement: "&c[HAVOC] Barter Shop telah ditutup."
     stopped-announcement: "&c[HAVOC] Barter Shop dihentikan oleh admin."
   offers: {}
+
+# Havoc Teleport: semua player online berpindah setelah seluruh pesan ActionBar selesai.
+teleport:
+  delay-seconds: 10 # waktu minimum sebelum teleport; animasi tetap harus selesai
+  world: world # Dipakai jika command koordinat dijalankan dari console.
+  announcement: "&6[HAVOC] Havoc Teleport dimulai."
+  completed-announcement: "&a[HAVOC] Semua player berhasil diteleportasikan."
+  effects:
+    darkness:
+      duration-seconds: 5
+      amplifier: 0 # 0 = level I, 1 = level II
+    levitation:
+      duration-seconds: 3
+      amplifier: 0
+  actionbar:
+    typing-speed-ticks: 2 # jeda per karakter; 1 tick = 0.05 detik
+    pause-between-ticks: 20
+    messages:
+      - "&6Incoming transmission..."
+      - "&fAll players are being summoned."
+      - "&cPrepare for teleportation..."
+  completion:
+    title: "&c&lHAVOC"
+    subtitle: "&fYou have been teleported!"
+    fade-in: 10
+    stay: 50
+    fade-out: 10
