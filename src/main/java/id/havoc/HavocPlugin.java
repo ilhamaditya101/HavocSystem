@@ -26,6 +26,9 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
     private final Map<String, Long> activeUntil = new HashMap<>();
     private final Map<String, Double> activeBoosts = new HashMap<>();
     private final Map<String, BossBar> bossBars = new HashMap<>();
+    private final Map<String, BukkitTask> boostTasks = new HashMap<>();
+    private BukkitTask teleportTask;
+    private boolean teleportRunning = false;
     private BossBar shopBossBar;
     private long shopEndsAt = 0L;
     private BukkitTask shopTimerTask;
@@ -48,6 +51,9 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
     @Override public void onDisable() {
         bossBars.values().forEach(BossBar::removeAll);
         bossBars.clear();
+        boostTasks.values().forEach(BukkitTask::cancel);
+        boostTasks.clear();
+        if (teleportTask != null) teleportTask.cancel();
         if (shopBossBar != null) shopBossBar.removeAll();
         if (shopTimerTask != null) shopTimerTask.cancel();
     }
@@ -98,11 +104,42 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
         if (args.length > 0 && args[0].equalsIgnoreCase("reload")) {
             reloadConfig();
             sender.sendMessage(color("&aConfig Havoc berhasil di-reload."));
-            sender.sendMessage(color("&7Event aktif tetap memakai timer dan boost sebelumnya."));
+            return true;
+        }
+        if (args.length >= 3 && args[0].equalsIgnoreCase("event") && args[2].equalsIgnoreCase("stop")) {
+            String type = args[1].toLowerCase(Locale.ROOT);
+            if (!type.equals("mending") && !type.equals("totem")) {
+                sender.sendMessage(color("&cGunakan: /havoc event <mending|totem> stop"));
+                return true;
+            }
+            stopBoost(type, sender);
+            return true;
+        }
+        if (args.length >= 2 && args[0].equalsIgnoreCase("tpall")) {
+            if (args.length == 4) {
+                try {
+                    double x = Double.parseDouble(args[1]);
+                    double y = Double.parseDouble(args[2]);
+                    double z = Double.parseDouble(args[3]);
+                    World world = sender instanceof Player player ? player.getWorld() : Bukkit.getWorld(getConfig().getString("teleport.world", "world"));
+                    if (world == null) { sender.sendMessage(color("&cWorld tujuan tidak ditemukan.")); return true; }
+                    startMassTeleport(sender, new Location(world, x, y, z));
+                } catch (NumberFormatException ex) {
+                    sender.sendMessage(color("&cKoordinat harus berupa angka. Gunakan /havoc tpall <x> <y> <z> atau /havoc tpall <player>"));
+                }
+                return true;
+            }
+            if (args.length == 2) {
+                Player target = Bukkit.getPlayerExact(args[1]);
+                if (target == null) sender.sendMessage(color("&cPlayer tidak ditemukan atau sedang offline."));
+                else startMassTeleport(sender, target.getLocation().clone());
+                return true;
+            }
+            sender.sendMessage(color("&cGunakan: /havoc tpall <x> <y> <z> atau /havoc tpall <player>"));
             return true;
         }
         if (args.length > 0) {
-            sender.sendMessage(color("&cPenggunaan: /hvc [reload]"));
+            sender.sendMessage(color("&cPenggunaan: /havoc [reload|event <mending|totem> stop|tpall <x> <y> <z>|tpall <player>]"));
             return true;
         }
         if (!(sender instanceof Player player)) {
@@ -120,8 +157,11 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
                         .filter(x -> x.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
             return Collections.emptyList();
         }
-        if (args.length == 1 && sender.hasPermission("havoc.admin"))
-            return Collections.singletonList("reload").stream().filter(x -> x.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
+        if (!sender.hasPermission("havoc.admin")) return Collections.emptyList();
+        if (args.length == 1) return Arrays.asList("reload", "event", "tpall").stream().filter(x -> x.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
+        if (args.length == 2 && args[0].equalsIgnoreCase("event")) return Arrays.asList("mending", "totem");
+        if (args.length == 3 && args[0].equalsIgnoreCase("event")) return Collections.singletonList("stop");
+        if (args.length == 2 && args[0].equalsIgnoreCase("tpall")) return Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
         return Collections.emptyList();
     }
 
@@ -148,7 +188,9 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
     private void openEvent(Player p) {
         Inventory inv = Bukkit.createInventory(null, 27, color(EVENT_TITLE));
         inv.setItem(10, item(Material.ENCHANTED_BOOK, "&bMending Boost", "&7Mulai event boost Mending.", "&8Hanya durasi/boost dari config.yml"));
+        inv.setItem(11, item(Material.BARRIER, "&cStop Mending", "&7Hentikan event Mending."));
         inv.setItem(12, item(Material.TOTEM_OF_UNDYING, "&eTotem Boost", "&7Mulai event boost Totem.", "&8Hanya durasi/boost dari config.yml"));
+        inv.setItem(13, item(Material.BARRIER, "&cStop Totem", "&7Hentikan event Totem."));
         inv.setItem(14, item(Material.PAPER, "&bChance Mending", "&7Saat ini: &f" + getConfig().getDouble("fishing.mending-chance") + "%", "&cKlik kiri: -0.1% | Shift+kiri: -1%", "&aKlik kanan: +0.1% | Shift+kanan: +1%"));
         inv.setItem(16, item(Material.TOTEM_OF_UNDYING, "&eChance Totem", "&7Saat ini: &f" + getConfig().getDouble("evoker.totem-chance") + "%", "&cKlik kiri: -0.1% | Shift+kiri: -1%", "&aKlik kanan: +0.1% | Shift+kanan: +1%"));
         inv.setItem(22, item(Material.EMERALD, "&aBarter Shop Event", "&7Mulai event shop untuk semua pemain.", "&8Durasi dan pesan dari config.yml"));
@@ -204,7 +246,9 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
         if (!title.equals(color(EVENT_TITLE))) return;
         int slot = e.getRawSlot();
         if (slot == 10) startBoost("mending", p);
+        else if (slot == 11) stopBoost("mending", p);
         else if (slot == 12) startBoost("totem", p);
+        else if (slot == 13) stopBoost("totem", p);
         else if (slot == 22) startShopEvent(p);
         else if (slot == 14 || slot == 16) {
             String path = slot == 14 ? "fishing.mending-chance" : "evoker.totem-chance";
@@ -400,6 +444,8 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
         double boost = getConfig().getDouble(path + "boost", 5.0);
         activeUntil.put(type, System.currentTimeMillis() + duration * 1000L);
         activeBoosts.put(type, boost);
+        BukkitTask previousTask = boostTasks.remove(type);
+        if (previousTask != null) previousTask.cancel();
         Bukkit.broadcastMessage(color(getConfig().getString(path + "announcement", "")));
         String title = color(getConfig().getString(path + "title", ""));
         String subtitle = color(getConfig().getString(path + "subtitle", ""));
@@ -414,7 +460,7 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
         bossBars.put(type, bar);
 
         final long endTime = System.currentTimeMillis() + duration * 1000L;
-        new BukkitRunnable() {
+        BukkitTask task = new BukkitRunnable() {
             @Override public void run() {
                 long millisLeft = Math.max(0L, endTime - System.currentTimeMillis());
                 long secondsLeft = (millisLeft + 999L) / 1000L;
@@ -423,7 +469,8 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
                     activeBoosts.remove(type);
                     bar.removeAll();
                     bossBars.remove(type);
-                    Bukkit.broadcastMessage(color("&c[HAVOC] Event " + type + " telah berakhir."));
+                    boostTasks.remove(type);
+                    Bukkit.broadcastMessage(color(getConfig().getString("events." + type + ".ended-announcement", "&c[HAVOC] Event " + type + " telah berakhir.")));
                     cancel();
                     return;
                 }
@@ -436,8 +483,91 @@ public final class HavocPlugin extends JavaPlugin implements Listener, CommandEx
                 bar.setProgress(Math.max(0.0, Math.min(1.0, millisLeft / (duration * 1000.0))));
             }
         }.runTaskTimer(this, 0L, 20L);
+        boostTasks.put(type, task);
         initiator.sendMessage(color("&aEvent boost berhasil dimulai."));
         openEvent(initiator);
+    }
+
+    private void stopBoost(String type, CommandSender sender) {
+        Long end = activeUntil.remove(type);
+        activeBoosts.remove(type);
+        BukkitTask task = boostTasks.remove(type);
+        if (task != null) task.cancel();
+        BossBar bar = bossBars.remove(type);
+        if (bar != null) bar.removeAll();
+        if (end == null) {
+            sender.sendMessage(color("&cEvent " + type + " sedang tidak aktif."));
+            return;
+        }
+        Bukkit.broadcastMessage(color(getConfig().getString("events." + type + ".stopped-announcement", "&c[HAVOC] Event " + type + " dihentikan oleh admin.")));
+        sender.sendMessage(color("&aEvent " + type + " berhasil dihentikan."));
+    }
+
+    private void startMassTeleport(CommandSender sender, Location destination) {
+        if (teleportRunning) {
+            sender.sendMessage(color("&cHavoc Teleport sedang berjalan."));
+            return;
+        }
+        List<String> messages = getConfig().getStringList("teleport.actionbar.messages");
+        if (messages.isEmpty()) messages = Arrays.asList("&6Incoming transmission...", "&fAll players are being summoned.", "&cPrepare for teleportation...");
+        final List<String> sequence = new ArrayList<>(messages);
+        final List<Player> recipients = new ArrayList<>(Bukkit.getOnlinePlayers());
+        if (recipients.isEmpty()) { sender.sendMessage(color("&cTidak ada player online.")); return; }
+        teleportRunning = true;
+        final long teleportStartedAt = System.currentTimeMillis();
+        final long minimumDelayMillis = Math.max(0, getConfig().getInt("teleport.delay-seconds", 10)) * 1000L;
+        int darknessDuration = Math.max(0, getConfig().getInt("teleport.effects.darkness.duration-seconds", 5));
+        int darknessLevel = Math.max(0, getConfig().getInt("teleport.effects.darkness.amplifier", 0));
+        int levitationDuration = Math.max(0, getConfig().getInt("teleport.effects.levitation.duration-seconds", 3));
+        int levitationLevel = Math.max(0, getConfig().getInt("teleport.effects.levitation.amplifier", 0));
+        for (Player player : recipients) {
+            if (darknessDuration > 0) player.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.DARKNESS, darknessDuration * 20, darknessLevel, true, false, true));
+            if (levitationDuration > 0) player.addPotionEffect(new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION, levitationDuration * 20, levitationLevel, true, false, true));
+        }
+        Bukkit.broadcastMessage(color(getConfig().getString("teleport.announcement", "&6[HAVOC] Havoc Teleport dimulai.")));
+        int speed = Math.max(1, getConfig().getInt("teleport.actionbar.typing-speed-ticks", 2));
+        int pause = Math.max(0, getConfig().getInt("teleport.actionbar.pause-between-ticks", 20));
+        teleportTask = new BukkitRunnable() {
+            int messageIndex = 0;
+            int charIndex = 0;
+            int waitTicks = 0;
+            int characterCooldown = 0;
+            @Override public void run() {
+                if (messageIndex >= sequence.size()) {
+                    if (System.currentTimeMillis() - teleportStartedAt < minimumDelayMillis) {
+                        String finalMessage = color(sequence.get(sequence.size() - 1));
+                        for (Player player : recipients) if (player.isOnline()) player.sendActionBar(finalMessage);
+                        return;
+                    }
+                    for (Player player : recipients) if (player.isOnline()) player.teleport(destination);
+                    String title = color(getConfig().getString("teleport.completion.title", "&c&lHAVOC"));
+                    String subtitle = color(getConfig().getString("teleport.completion.subtitle", "&fYou have been teleported!"));
+                    int fadeIn = Math.max(0, getConfig().getInt("teleport.completion.fade-in", 10));
+                    int stay = Math.max(0, getConfig().getInt("teleport.completion.stay", 50));
+                    int fadeOut = Math.max(0, getConfig().getInt("teleport.completion.fade-out", 10));
+                    for (Player player : recipients) if (player.isOnline()) player.sendTitle(title, subtitle, fadeIn, stay, fadeOut);
+                    Bukkit.broadcastMessage(color(getConfig().getString("teleport.completed-announcement", "&a[HAVOC] Semua player berhasil diteleportasikan.")));
+                    teleportRunning = false;
+                    teleportTask = null;
+                    cancel();
+                    return;
+                }
+                String message = sequence.get(messageIndex);
+                if (waitTicks > 0) { waitTicks--; return; }
+                if (characterCooldown > 0) { characterCooldown--; return; }
+                if (charIndex <= message.length()) {
+                    String partial = message.substring(0, charIndex);
+                    String rendered = color(partial);
+                    for (Player player : recipients) if (player.isOnline()) player.sendActionBar(rendered);
+                    charIndex++;
+                    characterCooldown = speed - 1;
+                } else {
+                    messageIndex++;
+                    charIndex = 0;
+                    waitTicks = pause;
+                }
+            }
+        }.runTaskTimer(this, 0L, 1L);
     }
 
     private double chance(String type) {
